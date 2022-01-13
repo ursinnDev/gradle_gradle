@@ -16,7 +16,8 @@
 
 import com.gradle.enterprise.gradleplugin.testdistribution.internal.TestDistributionExtensionInternal
 import gradlebuild.basics.BuildEnvironment
-import gradlebuild.basics.flakyTestQuarantine
+import gradlebuild.basics.FlakyTestStrategy
+import gradlebuild.basics.flakyTestStrategy
 import gradlebuild.basics.isExperimentalTestFilteringEnabled
 import gradlebuild.basics.maxParallelForks
 import gradlebuild.basics.maxTestDistributionPartitionSecond
@@ -25,6 +26,8 @@ import gradlebuild.basics.tasks.ClasspathManifest
 import gradlebuild.basics.testDistributionEnabled
 import gradlebuild.basics.testJavaVendor
 import gradlebuild.basics.testJavaVersion
+import gradlebuild.basics.testing.excludeSpockAnnotation
+import gradlebuild.basics.testing.includeSpockAnnotation
 import gradlebuild.filterEnvironmentVariables
 import gradlebuild.jvm.argumentproviders.CiEnvironmentProvider
 import gradlebuild.jvm.extension.UnitTestAndCompileExtension
@@ -183,12 +186,27 @@ fun Test.jvmVersionForTest(): JavaLanguageVersion {
     return JavaLanguageVersion.of(project.testJavaVersion)
 }
 
-fun Test.configureTestQuarantine() {
-    if (project.flakyTestQuarantine.isPresent) {
-        systemProperty("spock.configuration", "FlakyTestQuarantineSpockConfig.groovy")
-        (options as JUnitPlatformOptions).includeTags("org.gradle.test.fixtures.Flaky")
-    } else {
-        (options as JUnitPlatformOptions).excludeTags("org.gradle.test.fixtures.Flaky")
+fun Test.configureSpock() {
+    systemProperty("spock.configuration", "GradleBuildSpockConfig.groovy")
+}
+
+fun Test.configureFlakyTest() {
+    when (project.flakyTestStrategy) {
+        FlakyTestStrategy.INCLUDE -> {}
+        FlakyTestStrategy.EXCLUDE -> {
+            excludeSpockAnnotation("org.gradle.test.fixtures.Flaky")
+            (options as JUnitPlatformOptions).excludeTags("org.gradle.test.fixtures.Flaky")
+        }
+        FlakyTestStrategy.QUARANTINE -> {
+            // This is a very ugly workaround for https://github.com/spockframework/spock/issues/1288
+            // JUnit Platform `includeTags` works before Spock engine, thus exclude ALL spock tests.
+            // For now, we only use `includeTags` for non-spock subproject
+            if (project.name.startsWith("kotlin-dsl")) {
+                (options as JUnitPlatformOptions).includeTags("org.gradle.test.fixtures.Flaky")
+            } else {
+                includeSpockAnnotation("org.gradle.test.fixtures.Flaky")
+            }
+        }
     }
 }
 
@@ -231,12 +249,12 @@ fun Test.configureRerun() {
 }
 
 fun Test.determineMaxRetries() = when {
-    project.flakyTestQuarantine.isPresent -> 4
-    else -> 1
+    project.flakyTestStrategy == FlakyTestStrategy.QUARANTINE -> 4
+    else -> 2
 }
 
 fun Test.determineMaxFailures() = when {
-    project.flakyTestQuarantine.isPresent -> Integer.MAX_VALUE
+    project.flakyTestStrategy == FlakyTestStrategy.QUARANTINE -> Integer.MAX_VALUE
     else -> 10
 }
 
@@ -271,7 +289,8 @@ fun configureTests() {
         }
 
         useJUnitPlatform()
-        configureTestQuarantine()
+        configureSpock()
+        configureFlakyTest()
 
         if (project.enableExperimentalTestFiltering() && !isUnitTest()) {
             distribution {

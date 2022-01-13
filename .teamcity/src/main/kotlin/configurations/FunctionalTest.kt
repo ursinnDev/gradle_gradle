@@ -4,6 +4,7 @@ import common.functionalTestExtraParameters
 import jetbrains.buildServer.configs.kotlin.v2019_2.BuildSteps
 import model.CIBuildModel
 import model.Stage
+import model.StageNames
 import model.TestCoverage
 import model.TestType
 
@@ -38,6 +39,7 @@ class FunctionalTest(
         extraParameters = (
             listOf(functionalTestExtraParameters("FunctionalTest", testCoverage.os, testCoverage.testJvmVersion.major.toString(), testCoverage.vendor.name)) +
                 (if (enableTestDistribution) "-DenableTestDistribution=%enableTestDistribution% -DtestDistributionPartitionSizeInSeconds=%testDistributionPartitionSizeInSeconds%" else "") +
+                (if (stage.stageName == StageNames.READY_FOR_RELEASE) "" else "-PflakyTest=exclude") +
                 extraParameters
             ).filter { it.isNotBlank() }.joinToString(separator = " "),
         timeout = testCoverage.testType.timeout,
